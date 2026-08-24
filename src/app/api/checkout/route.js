@@ -10,9 +10,13 @@ export async function POST(req) {
   try {
     const { handle, amount } = await req.json();
 
+    // Convert USD to INR (e.g., rate ~95.8) and then to paise (* 100)
+    const USD_TO_INR_RATE = 95.8;
+    const amountInPaise = Math.round(Number(amount) * USD_TO_INR_RATE * 100);
+
     const options = {
-      amount: amount * 100, // Razorpay processes in subunit (paisa/cents)
-      currency: 'INR', // Switch to 'USD' if your Razorpay account is international
+      amount: amountInPaise, // Passes the correct converted paise value to Razorpay
+      currency: 'INR',       // Processed natively via INR to prevent gateway currency mismatches
       receipt: `receipt_${Date.now()}`,
     };
 
@@ -25,6 +29,7 @@ export async function POST(req) {
       keyId: process.env.RAZORPAY_KEY_ID,
     });
   } catch (err) {
+    console.error('Checkout error:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

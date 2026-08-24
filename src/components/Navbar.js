@@ -7,7 +7,7 @@ export default function Navbar() {
         <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-pink-500 via-purple-500 to-yellow-400 flex items-center justify-center font-black text-black text-sm">
           👑
         </div>
-        <span className="font-bold text-white tracking-tight text-lg">BidInsta</span>
+        <span className="font-bold text-white tracking-tight text-lg">BidGram</span>
       </Link>
 
       <div className="flex items-center gap-8 text-sm font-medium text-zinc-400">

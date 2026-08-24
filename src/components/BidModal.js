@@ -22,7 +22,7 @@ export default function BidModal() {
 
   const handleCheckout = async (e) => {
     e.preventDefault();
-    if (!handle || !amount || amount <= 0) {
+    if (!handle || !amount || Number(amount) <= 0) {
       alert('Please enter a valid Instagram handle and bid amount.');
       return;
     }
@@ -37,7 +37,6 @@ export default function BidModal() {
     }
 
     try {
-      // 1. Create order on your backend API with the exact amount
       const orderRes = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -51,16 +50,14 @@ export default function BidModal() {
         return;
       }
 
-      // 2. Configure Razorpay native modal options
       const options = {
         key: orderData.keyId,
-        amount: orderData.amount, // Exact amount in paise
+        amount: orderData.amount,
         currency: orderData.currency,
         name: 'BidGram',
         description: `Outbid / Claim spot for @${handle}`,
         order_id: orderData.orderId,
         handler: async function (response) {
-          // 3. Verify payment signature on backend securely
           const verifyRes = await fetch('/api/verify', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -87,7 +84,6 @@ export default function BidModal() {
         },
       };
 
-      // 4. Open the native checkout popup right on screen
       const rzp = new window.Razorpay(options);
       rzp.open();
     } catch (err) {
@@ -121,17 +117,30 @@ export default function BidModal() {
 
         <div>
           <label className="block text-xs uppercase tracking-wider text-neutral-400 mb-1">
-            Bid Amount (₹)
+            Bid Amount (₹ / Equivalent)
           </label>
-          <input
-            type="number"
-            placeholder="100"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            className="w-full bg-neutral-800 border border-neutral-700 rounded-xl px-4 py-3 focus:outline-none focus:border-white transition text-white"
-            required
-            min="1"
-          />
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              placeholder="100"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className="w-full bg-neutral-800 border border-neutral-700 rounded-xl px-4 py-3 focus:outline-none focus:border-white transition text-white"
+              required
+              min="1"
+            />
+            <button
+              type="button"
+              onClick={() => {
+                const current = Number(amount) || 0;
+                setAmount((current + 1).toString());
+              }}
+              className="px-4 py-3 bg-neutral-800 border border-neutral-700 hover:bg-neutral-700 rounded-xl font-mono text-xs font-bold transition shrink-0 cursor-pointer"
+              title="Increase amount by minimum 1"
+            >
+              + $1 Min
+            </button>
+          </div>
         </div>
 
         <button
