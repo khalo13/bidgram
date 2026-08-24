@@ -230,7 +230,7 @@ export default function Home() {
         </p>
 
         {/* Live Trackable Header Box */}
-        <div className="w-full max-w-xl bg-zinc-950 border border-zinc-800/80 p-6 md:p-8 rounded-3xl shadow-2xl space-y-6 text-left">
+        <div className="w-full max-w-2xl bg-zinc-950 border border-zinc-800/80 p-6 md:p-8 rounded-xl shadow-2xl space-y-5 text-left">
           <div className="flex justify-between items-center text-xs font-mono">
             <span className="text-pink-500 font-bold uppercase tracking-wider">LIVE AUCTION ({selectedCategory})</span>
             <span className="text-zinc-500">Secure Gateway ($ USD)</span>

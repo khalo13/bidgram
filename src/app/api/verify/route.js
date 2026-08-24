@@ -2,13 +2,14 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
-
 export async function POST(request) {
   try {
+    // Initialize Supabase lazily inside the handler so it only reads process.env when a request is actually made at runtime
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY
+    );
+
     const {
       razorpay_order_id,
       razorpay_payment_id,
@@ -29,7 +30,7 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'Invalid signature' }, { status: 400 });
     }
 
-    // 2. Insert only the core data into your lean Supabase table
+    // 2. Insert data into your Supabase table
     const { data, error } = await supabase.from('bids').insert([
       {
         instagram_handle: handle,
