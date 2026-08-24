@@ -22,75 +22,26 @@ export default function BidModal() {
 
   const handleCheckout = async (e) => {
     e.preventDefault();
-    if (!handle || !amount || Number(amount) <= 0) {
-      alert('Please enter a valid Instagram handle and bid amount.');
-      return;
-    }
-
-    setLoading(true);
-
-    const scriptLoaded = await loadRazorpayScript();
-    if (!scriptLoaded) {
-      alert('Razorpay SDK failed to load. Check your internet connection.');
-      setLoading(false);
-      return;
-    }
+    setPaying(true);
 
     try {
-      const orderRes = await fetch('/api/checkout', {
+      const res = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: Number(amount), handle: handle.trim() }),
+        body: JSON.stringify({ amount: numericAmount, handle: cleanHandle, category: targetCategoryForPayment }),
       });
 
-      const orderData = await orderRes.json();
-      if (!orderData.orderId) {
-        alert(orderData.error || 'Failed to create payment order.');
-        setLoading(false);
-        return;
+      const data = await res.json();
+      if (data.url) {
+        // Seamlessly redirect user to Razorpay's hosted checkout page
+        window.location.href = data.url;
+      } else {
+        alert(data.error || 'Could not launch checkout.');
+        setPaying(false);
       }
-
-      const options = {
-        key: orderData.keyId,
-        amount: orderData.amount,
-        currency: orderData.currency,
-        name: 'BidGram',
-        description: `Outbid / Claim spot for @${handle}`,
-        order_id: orderData.orderId,
-        handler: async function (response) {
-          const verifyRes = await fetch('/api/verify', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              razorpay_order_id: response.razorpay_order_id,
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_signature: response.razorpay_signature,
-            }),
-          });
-
-          const verifyData = await verifyRes.json();
-          if (verifyData.success) {
-            alert('Payment successful! Your spot is secured.');
-            window.location.reload();
-          } else {
-            alert('Payment verification failed.');
-          }
-        },
-        prefill: {
-          name: handle,
-        },
-        theme: {
-          color: '#000000',
-        },
-      };
-
-      const rzp = new window.Razorpay(options);
-      rzp.open();
     } catch (err) {
       console.error(err);
-      alert('Something went wrong during checkout.');
-    } finally {
-      setLoading(false);
+      setPaying(false);
     }
   };
 
