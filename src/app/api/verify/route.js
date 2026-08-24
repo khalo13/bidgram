@@ -4,13 +4,21 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+  process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-export async function POST(req) {
+export async function POST(request) {
   try {
-    const { razorpay_order_id, razorpay_payment_id, razorpay_signature, handle, amount } = await req.json();
+    const {
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      handle,
+      amount,
+      category,
+    } = await request.json();
 
+    // 1. Verify Razorpay Signature securely
     const body = razorpay_order_id + '|' + razorpay_payment_id;
     const expectedSignature = crypto
       .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
@@ -18,46 +26,26 @@ export async function POST(req) {
       .digest('hex');
 
     if (expectedSignature !== razorpay_signature) {
-      return NextResponse.json({ success: false, message: 'Invalid signature' }, { status: 400 });
+      return NextResponse.json({ success: false, error: 'Invalid signature' }, { status: 400 });
     }
 
-    const cleanHandle = handle.trim().replace(/^@/, '');
-    const paidAmount = Number(amount);
+    // 2. Insert only the core data into your lean Supabase table
+    const { data, error } = await supabase.from('bids').insert([
+      {
+        instagram_handle: handle,
+        bid_amount: Number(amount),
+        category: category,
+      },
+    ]);
 
-    const { data: existingUser } = await supabase
-      .from('bids')
-      .select('bid_amount')
-      .eq('instagram_handle', cleanHandle)
-      .single();
-
-    if (existingUser) {
-      const newTotal = existingUser.bid_amount + paidAmount;
-      await supabase
-        .from('bids')
-        .update({ bid_amount: newTotal, updated_at: new Date().toISOString() })
-        .eq('instagram_handle', cleanHandle);
-    } else {
-      await supabase.from('bids').insert({
-        instagram_handle: cleanHandle,
-        bid_amount: paidAmount,
-        updated_at: new Date().toISOString(),
-      });
+    if (error) {
+      console.error('Supabase insertion error:', error);
+      return NextResponse.json({ success: false, error: error.message }, { status: 500 });
     }
 
-    // Keep table strictly capped at top 100 entries
-    const { data: allBids } = await supabase
-      .from('bids')
-      .select('id')
-      .order('bid_amount', { ascending: false })
-      .order('updated_at', { ascending: true });
-
-    if (allBids && allBids.length > 100) {
-      const excessIds = allBids.slice(100).map((b) => b.id);
-      await supabase.from('bids').delete().in('id', excessIds);
-    }
-
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, data });
   } catch (err) {
-    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+    console.error('Verification error:', err);
+    return NextResponse.json({ success: false, error: 'Internal server error' }, { status: 500 });
   }
 }
