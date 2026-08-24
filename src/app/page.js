@@ -19,7 +19,6 @@ const CATEGORIES = [
   { name: 'Fitness & Health', icon: 'heart' },
 ];
 
-// Small inline icon set for category pills (no extra dependency)
 function CategoryIcon({ type, className = 'w-4 h-4' }) {
   const common = { className, fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', strokeWidth: 1.8 };
   switch (type) {
@@ -56,7 +55,6 @@ function CategoryIcon({ type, className = 'w-4 h-4' }) {
   }
 }
 
-// Deterministic gradient + initial "avatar" for handles without a profile image
 const AVATAR_GRADIENTS = [
   'from-orange-400 to-pink-500',
   'from-pink-500 to-purple-600',
@@ -66,14 +64,32 @@ const AVATAR_GRADIENTS = [
   'from-fuchsia-500 to-pink-500',
   'from-sky-400 to-blue-600',
 ];
+
 function avatarGradient(handle = '') {
   const sum = handle.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
   return AVATAR_GRADIENTS[sum % AVATAR_GRADIENTS.length];
 }
+
 function HandleAvatar({ handle, size = 'w-12 h-12 text-lg' }) {
+  const [imgError, setImgError] = useState(false);
+  const cleanHandle = handle ? handle.replace(/^@/, '') : '';
+
+  if (!imgError && cleanHandle) {
+    return (
+      <div className={`${size} shrink-0 rounded-2xl bg-zinc-900 border border-zinc-800 overflow-hidden flex items-center justify-center p-0.5`}>
+        <img
+          src={`https://unavatar.io/instagram/${cleanHandle}?fallback=false`}
+          alt={cleanHandle}
+          className="w-full h-full object-cover rounded-xl"
+          onError={() => setImgError(true)}
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className={`${size} shrink-0 rounded-2xl bg-gradient-to-br ${avatarGradient(handle)} flex items-center justify-center font-black text-white`}>
-      {handle?.[0]?.toUpperCase() || '?'}
+    <div className={`${size} shrink-0 rounded-2xl bg-gradient-to-br ${avatarGradient(cleanHandle)} flex items-center justify-center font-black text-white`}>
+      {cleanHandle?.[0]?.toUpperCase() || '?'}
     </div>
   );
 }
@@ -83,7 +99,7 @@ export default function Home() {
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [loading, setLoading] = useState(true);
 
-  // Dynamic Total Visitors state (initialized to null/0 so it pulls directly from your backend cache)
+  // Dynamic Total Visitors state
   const [totalVisitors, setTotalVisitors] = useState(null);
 
   // Form states
@@ -94,7 +110,6 @@ export default function Home() {
   const fileInputRef = useRef(null);
 
   useEffect(() => {
-    // 1. Generate or retrieve unique session ID for this browser tab
     let sessionId = sessionStorage.getItem('bidgram_session_id');
     if (!sessionId) {
       sessionId = Math.random().toString(36).substring(2);
@@ -107,7 +122,6 @@ export default function Home() {
       sessionStorage.setItem('render_server_cached_visitor', 'true');
     }
 
-    // 2. Track visit / fetch live counter from backend API cache
     async function trackVisitor() {
       try {
         const res = await fetch('/api/visitors', {
@@ -118,7 +132,7 @@ export default function Home() {
             isNewVisit: isNewVisit && window.isFirstPing !== true
           }),
         });
-        window.isFirstPing = true; // Prevents double-counting new visits on subsequent triggers
+        window.isFirstPing = true;
         const data = await res.json();
         if (data.totalVisitors !== undefined) {
           setTotalVisitors(data.totalVisitors);
@@ -128,7 +142,6 @@ export default function Home() {
       }
     }
 
-    // 3. Fetch Bids Leaderboard from Supabase
     async function fetchBids() {
       const { data: bidData, error: bidError } = await supabase
         .from('bids')
@@ -159,21 +172,23 @@ export default function Home() {
   const isClaimingNumberOne = numericAmount > currentTopBidForCategory;
   const predictedRank = activeCategoryBids.filter(b => b.bid_amount > numericAmount).length + 1;
 
-  const parseInstagramInput = (raw) => {
-    let cleaned = raw.trim();
-    if (cleaned.includes('instagram.com/') || cleaned.includes('instagr.am/')) {
-      const parts = cleaned.split(/instagram\.com\/|instagr\.am\//);
-      if (parts[1]) {
-        cleaned = parts[1].split('/')[0].split('?')[0];
-      }
+  // Strict Instagram Profile URL Regex Pattern
+  const instagramUrlPattern = /^https?:\/\/(www\.)?instagram\.com\/[a-zA-Z0-9._]{1,30}\/?(\?.*)?$/i;
+
+  // Extracts handle for display/saving while enforcing full URL entry
+  const extractHandleFromUrl = (urlStr) => {
+    if (!urlStr || !instagramUrlPattern.test(urlStr.trim())) return '';
+    try {
+      const parsedUrl = new URL(urlStr.trim().startsWith('http') ? urlStr.trim() : `https://${urlStr.trim()}`);
+      const pathSegments = parsedUrl.pathname.split('/').filter(Boolean);
+      return pathSegments[0] || '';
+    } catch {
+      return '';
     }
-    cleaned = cleaned.replace(/^@/, '').replace(/\/$/, '');
-    cleaned = cleaned.replace(/[^a-zA-Z0-9._]/g, '');
-    return cleaned;
   };
 
-  const cleanHandle = parseInstagramInput(inputVal);
-  const isValidHandleFormat = /^[a-zA-Z0-9._]{1,30}$/.test(cleanHandle);
+  const cleanHandle = extractHandleFromUrl(inputVal);
+  const isValidInstagramUrl = instagramUrlPattern.test(inputVal.trim());
 
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
@@ -194,7 +209,16 @@ export default function Home() {
         const qrCode = jsQR(imageData.data, imageData.width, imageData.height);
 
         if (qrCode && qrCode.data) {
-          setInputVal(qrCode.data);
+          const rawScanned = qrCode.data.trim();
+          if (instagramUrlPattern.test(rawScanned)) {
+            setInputVal(rawScanned);
+          } else if (/^[a-zA-Z0-9._]{1,30}$/.test(rawScanned.replace(/^@/, ''))) {
+            // Auto-format into complete URL if QR returns raw username
+            const handleOnly = rawScanned.replace(/^@/, '');
+            setInputVal(`https://www.instagram.com/${handleOnly}/`);
+          } else {
+            alert('Scanned QR code is not a valid Instagram profile URL.');
+          }
         } else {
           alert('Could not detect a valid Instagram QR code in this image.');
         }
@@ -221,8 +245,8 @@ export default function Home() {
 
   const handleCheckout = async (e) => {
     e.preventDefault();
-    if (!cleanHandle || !isValidHandleFormat) {
-      alert('Please enter a valid Instagram handle or profile URL.');
+    if (!isValidInstagramUrl || !cleanHandle) {
+      alert('Please enter a full, valid Instagram profile URL (e.g. https://www.instagram.com/yourusername)');
       return;
     }
 
@@ -231,7 +255,7 @@ export default function Home() {
       return;
     }
 
-    const targetCategoryForPayment = selectedCategory === 'All' ? 'Productivity' : selectedCategory;
+    const targetCategoryForPayment = selectedCategory === 'All' ? 'Content Creator' : selectedCategory;
 
     setPaying(true);
     const scriptLoaded = await loadRazorpayScript();
@@ -245,7 +269,7 @@ export default function Home() {
       const orderRes = await fetch('/api/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: numericAmount, handle: cleanHandle, category: targetCategoryForPayment }),
+        body: JSON.stringify({ amount: numericAmount, handle: `@${cleanHandle}`, category: targetCategoryForPayment }),
       });
 
       const orderData = await orderRes.json();
@@ -270,7 +294,7 @@ export default function Home() {
               razorpay_order_id: response.razorpay_order_id,
               razorpay_payment_id: response.razorpay_payment_id,
               razorpay_signature: response.razorpay_signature,
-              handle: cleanHandle,
+              handle: `@${cleanHandle}`,
               amount: numericAmount,
               category: targetCategoryForPayment,
             }),
@@ -321,7 +345,7 @@ export default function Home() {
         </h1>
 
         <p className="text-zinc-400 text-sm md:text-base max-w-xl leading-relaxed px-2">
-          A transparent leaderboard where Instagram handles compete by category.
+          A transparent leaderboard where Instagram creators and brands compete by category.
         </p>
 
         {/* Live Trackable Header Box */}
@@ -364,7 +388,7 @@ export default function Home() {
           <form onSubmit={handleCheckout} className="space-y-4 pt-2 border-t border-zinc-900">
             <div className="space-y-1.5">
               <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1.5 sm:gap-2">
-                <label className="text-xs font-mono text-zinc-400 uppercase tracking-wider">Instagram Profile / QR Code</label>
+                <label className="text-xs font-mono text-zinc-400 uppercase tracking-wider">INSTAGRAM PROFILE LINK ONLY</label>
 
                 <input
                   type="file"
@@ -379,15 +403,15 @@ export default function Home() {
                   onClick={() => fileInputRef.current?.click()}
                   className="text-[11px] font-mono text-pink-400 hover:underline flex items-center gap-1 cursor-pointer self-start sm:self-auto"
                 >
-                  {scanningQR ? 'Scanning QR...' : '📷 Upload Insta QR Code'}
+                  {scanningQR ? 'Scanning QR...' : '📷 Upload Instagram QR Code'}
                 </button>
               </div>
 
               <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-xl px-3 focus-within:border-pink-500 transition">
                 <span className="text-zinc-500 mr-2 text-xs font-mono shrink-0">🔗</span>
                 <input
-                  type="text"
-                  placeholder="Paste URL or handle"
+                  type="url"
+                  placeholder="https://www.instagram.com/yourusername"
                   value={inputVal}
                   onChange={(e) => setInputVal(e.target.value)}
                   className="w-full min-w-0 bg-transparent py-3.5 focus:outline-none text-white text-sm"
@@ -396,19 +420,19 @@ export default function Home() {
               </div>
             </div>
 
-            {cleanHandle && isValidHandleFormat && (
+            {isValidInstagramUrl && cleanHandle && (
               <div className="p-3 sm:p-3.5 rounded-2xl bg-zinc-900/60 border border-zinc-800 flex flex-wrap items-center justify-between gap-3 text-xs font-mono animate-fadeIn">
                 <div className="flex items-center gap-3 min-w-0">
                   <span className="text-zinc-500 font-bold shrink-0">#{predictedRank}</span>
                   <div className="min-w-0">
-                    <span className="text-zinc-500 block text-[10px] uppercase tracking-wider">Verified Target Profile</span>
+                    <span className="text-zinc-500 block text-[10px] uppercase tracking-wider">Verified Profile URL</span>
                     <a
                       href={`https://instagram.com/${cleanHandle}`}
                       target="_blank"
                       rel="noreferrer"
                       className="font-bold text-pink-400 hover:underline text-sm flex items-center gap-1 mt-0.5 truncate"
                     >
-                      @{cleanHandle} ↗
+                      {cleanHandle} ↗
                     </a>
                   </div>
                 </div>
@@ -417,6 +441,12 @@ export default function Home() {
                   <span className="text-emerald-400 font-bold text-sm">${numericAmount}</span>
                 </div>
               </div>
+            )}
+
+            {!isValidInstagramUrl && inputVal.trim() !== '' && (
+              <p className="text-xs text-rose-400 font-mono">
+                ⚠️ Only full Instagram profile links are allowed (e.g. https://www.instagram.com/yourusername)
+              </p>
             )}
 
             <div className="flex items-center gap-2 pt-1">
@@ -428,7 +458,7 @@ export default function Home() {
 
             <button
               type="submit"
-              disabled={paying || !isValidHandleFormat}
+              disabled={paying || !isValidInstagramUrl}
               className="w-full bg-gradient-to-r from-orange-500 via-pink-500 to-purple-600 text-white font-bold py-4 rounded-xl hover:opacity-95 transition shadow-lg shadow-pink-500/25 cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
             >
               <span>{paying ? 'Initializing Gateway...' : `Place bid ($${numericAmount})`}</span>
@@ -439,7 +469,7 @@ export default function Home() {
 
         <div className="w-full max-w-7xl pt-6">
           <p className="text-xs font-mono text-zinc-500 uppercase tracking-wider mb-3">Select category to track & bid:</p>
-          <div className="flex items-center justify-center sm:justify-center gap-2 sm:gap-2.5 flex-wrap  overflow-x-auto sm:overflow-visible">
+          <div className="flex items-center justify-center sm:justify-center gap-2 sm:gap-2.5 flex-wrap overflow-x-auto sm:overflow-visible">
             {CATEGORIES.map((cat) => {
               const isActive = selectedCategory === cat.name;
               return (
@@ -467,7 +497,7 @@ export default function Home() {
             <span>🔥</span> Top 100 Leaderboard — <span className="text-pink-500">{selectedCategory}</span>
           </h2>
           <span className="text-xs font-mono text-zinc-500">
-            Showing top {filteredLeaderboardBids.length} handles
+            Showing top {filteredLeaderboardBids.length} profiles
           </span>
         </div>
 
@@ -484,8 +514,6 @@ export default function Home() {
             const top3 = filteredLeaderboardBids.slice(0, 3);
             const rest = filteredLeaderboardBids.slice(3);
 
-            // Group ranks 4+ into chunks of ten (4-10, 11-20, 21-30, ...) so a
-            // "TOP N" divider can be dropped between chunks.
             const restChunks = [];
             let currentChunk = [];
             rest.forEach((entry, j) => {
@@ -500,7 +528,7 @@ export default function Home() {
 
             const outbid = (entry) => {
               setAmount((entry.bid_amount + 1).toString());
-              setSelectedCategory(entry.category || 'Productivity');
+              setSelectedCategory(entry.category || 'Content Creator');
               window.scrollTo({ top: 400, behavior: 'smooth' });
             };
 
@@ -533,6 +561,7 @@ export default function Home() {
                     const rank = i + 1;
                     const style = RANK_STYLES[rank];
                     const nextEntry = top3[i + 1];
+                    const handleName = entry.instagram_handle ? entry.instagram_handle.replace(/^@/, '') : '';
 
                     return (
                       <div key={entry.id}>
@@ -542,17 +571,17 @@ export default function Home() {
                               {rank}
                             </div>
 
-                            <HandleAvatar handle={entry.instagram_handle} size="w-11 h-11 sm:w-12 sm:h-12 text-base sm:text-lg" />
+                            <HandleAvatar handle={handleName} size="w-11 h-11 sm:w-12 sm:h-12 text-base sm:text-lg" />
 
                             <div className="min-w-0 flex-1">
                               <div className="flex items-start justify-between gap-3">
                                 <a
-                                  href={`https://instagram.com/${entry.instagram_handle}`}
+                                  href={`https://instagram.com/${handleName}`}
                                   target="_blank"
                                   rel="noreferrer"
                                   className="font-bold text-white hover:text-pink-400 transition truncate text-sm sm:text-base"
                                 >
-                                  @{entry.instagram_handle} {rank === 1 && '👑'}
+                                  https://instagram.com/{handleName} {rank === 1 && '👑'}
                                 </a>
                                 <span className={`shrink-0 font-mono font-black text-base sm:text-lg ${style.price}`}>
                                   ${entry.bid_amount.toLocaleString()}
@@ -562,10 +591,10 @@ export default function Home() {
                               <div className="flex items-center flex-wrap gap-x-3 gap-y-1.5 mt-2 text-[11px] sm:text-xs font-mono text-zinc-500">
                                 <span className="inline-flex items-center gap-1 bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded-lg text-zinc-400">
                                   <CategoryIcon
-                                    type={CATEGORIES.find((c) => c.name === (entry.category || 'Productivity'))?.icon || 'grid'}
+                                    type={CATEGORIES.find((c) => c.name === (entry.category || 'Content Creator'))?.icon || 'grid'}
                                     className="w-3 h-3"
                                   />
-                                  {entry.category || 'Productivity'}
+                                  {entry.category || 'Content Creator'}
                                 </span>
                                 <button
                                   onClick={() => outbid(entry)}
@@ -602,48 +631,51 @@ export default function Home() {
                   return (
                     <div key={`chunk-${ci}`}>
                       <div className="bg-[#111114] border border-zinc-800/80 rounded-2xl overflow-hidden shadow-xl divide-y divide-zinc-900">
-                        {chunk.map(({ entry, rank }) => (
-                          <div
-                            key={entry.id}
-                            className="flex items-center gap-3 sm:gap-4 px-4 sm:px-6 py-3.5 sm:py-4 hover:bg-zinc-900/40 transition"
-                          >
-                            <div className="w-6 sm:w-8 shrink-0 font-mono font-bold text-zinc-500 text-sm text-center">
-                              {rank}
-                            </div>
-
-                            <HandleAvatar handle={entry.instagram_handle} size="w-9 h-9 sm:w-10 sm:h-10 text-sm" />
-
-                            <div className="min-w-0 flex-1">
-                              <a
-                                href={`https://instagram.com/${entry.instagram_handle}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="font-bold text-white hover:text-pink-400 transition truncate block text-sm"
-                              >
-                                @{entry.instagram_handle}
-                              </a>
-                              <div className="flex items-center flex-wrap gap-x-3 gap-y-1 mt-1 text-[10px] sm:text-[11px] font-mono text-zinc-500">
-                                <span className="inline-flex items-center gap-1 bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded-lg text-zinc-400">
-                                  <CategoryIcon
-                                    type={CATEGORIES.find((c) => c.name === (entry.category || 'Productivity'))?.icon || 'grid'}
-                                    className="w-3 h-3"
-                                  />
-                                  {entry.category || 'Productivity'}
-                                </span>
-                                <button
-                                  onClick={() => outbid(entry)}
-                                  className="text-pink-400 hover:underline cursor-pointer"
-                                >
-                                  outbid ↗
-                                </button>
+                        {chunk.map(({ entry, rank }) => {
+                          const handleName = entry.instagram_handle ? entry.instagram_handle.replace(/^@/, '') : '';
+                          return (
+                            <div
+                              key={entry.id}
+                              className="flex items-center gap-3 sm:gap-4 px-4 sm:px-6 py-3.5 sm:py-4 hover:bg-zinc-900/40 transition"
+                            >
+                              <div className="w-6 sm:w-8 shrink-0 font-mono font-bold text-zinc-500 text-sm text-center">
+                                {rank}
                               </div>
-                            </div>
 
-                            <span className="shrink-0 font-mono font-bold text-orange-400 text-sm sm:text-base">
-                              ${entry.bid_amount.toLocaleString()}
-                            </span>
-                          </div>
-                        ))}
+                              <HandleAvatar handle={handleName} size="w-9 h-9 sm:w-10 sm:h-10 text-sm" />
+
+                              <div className="min-w-0 flex-1">
+                                <a
+                                  href={`https://instagram.com/${handleName}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="font-bold text-white hover:text-pink-400 transition truncate block text-sm"
+                                >
+                                  https://instagram.com/{handleName}
+                                </a>
+                                <div className="flex items-center flex-wrap gap-x-3 gap-y-1 mt-1 text-[10px] sm:text-[11px] font-mono text-zinc-500">
+                                  <span className="inline-flex items-center gap-1 bg-zinc-900 border border-zinc-800 px-2 py-0.5 rounded-lg text-zinc-400">
+                                    <CategoryIcon
+                                      type={CATEGORIES.find((c) => c.name === (entry.category || 'Content Creator'))?.icon || 'grid'}
+                                      className="w-3 h-3"
+                                    />
+                                    {entry.category || 'Content Creator'}
+                                  </span>
+                                  <button
+                                    onClick={() => outbid(entry)}
+                                    className="text-pink-400 hover:underline cursor-pointer"
+                                  >
+                                    outbid ↗
+                                  </button>
+                                </div>
+                              </div>
+
+                              <span className="shrink-0 font-mono font-bold text-orange-400 text-sm sm:text-base">
+                                ${entry.bid_amount.toLocaleString()}
+                              </span>
+                            </div>
+                          );
+                        })}
                       </div>
 
                       {/* "TOP N" divider between chunks */}
