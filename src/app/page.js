@@ -22,6 +22,9 @@ export default function Home() {
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [loading, setLoading] = useState(true);
 
+  // Dynamic Total Visitors state (initialized to null/0 so it pulls directly from your backend cache)
+  const [totalVisitors, setTotalVisitors] = useState(null);
+
   // Form states
   const [inputVal, setInputVal] = useState('');
   const [amount, setAmount] = useState('10');
@@ -30,17 +33,54 @@ export default function Home() {
   const fileInputRef = useRef(null);
 
   useEffect(() => {
+    // 1. Generate or retrieve unique session ID for this browser tab
+    let sessionId = sessionStorage.getItem('bidgram_session_id');
+    if (!sessionId) {
+      sessionId = Math.random().toString(36).substring(2);
+      sessionStorage.setItem('bidgram_session_id', sessionId);
+    }
+
+    const hasVisitedBefore = sessionStorage.getItem('render_server_cached_visitor');
+    const isNewVisit = !hasVisitedBefore;
+    if (isNewVisit) {
+      sessionStorage.setItem('render_server_cached_visitor', 'true');
+    }
+
+    // 2. Track visit / fetch live counter from backend API cache
+    async function trackVisitor() {
+      try {
+        const res = await fetch('/api/visitors', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            sessionId, 
+            isNewVisit: isNewVisit && window.isFirstPing !== true 
+          }),
+        });
+        window.isFirstPing = true; // Prevents double-counting new visits on subsequent triggers
+        const data = await res.json();
+        if (data.totalVisitors !== undefined) {
+          setTotalVisitors(data.totalVisitors);
+        }
+      } catch (err) {
+        console.error('Error syncing visitor stats:', err);
+      }
+    }
+
+    // 3. Fetch Bids Leaderboard from Supabase
     async function fetchBids() {
-      const { data, error } = await supabase
+      const { data: bidData, error: bidError } = await supabase
         .from('bids')
         .select('*')
         .order('bid_amount', { ascending: false })
         .limit(100);
 
-      if (!error && data) setBids(data);
+      if (!bidError && bidData) setBids(bidData);
       setLoading(false);
     }
+
     fetchBids();
+    trackVisitor();
   }, []);
 
   const filteredLeaderboardBids = bids.filter((bid) => {
@@ -58,21 +98,15 @@ export default function Home() {
   const isClaimingNumberOne = numericAmount > currentTopBidForCategory;
   const predictedRank = activeCategoryBids.filter(b => b.bid_amount > numericAmount).length + 1;
 
-  // --- SMART PARSER: Handles Raw Handles, Full URLs, or QR Code text ---
   const parseInstagramInput = (raw) => {
     let cleaned = raw.trim();
-    
-    // If it's a full URL (e.g. instagram.com/username or instagr.am/username)
     if (cleaned.includes('instagram.com/') || cleaned.includes('instagr.am/')) {
       const parts = cleaned.split(/instagram\.com\/|instagr\.am\//);
       if (parts[1]) {
         cleaned = parts[1].split('/')[0].split('?')[0];
       }
     }
-
-    // Strip leading @ or trailing slashes
     cleaned = cleaned.replace(/^@/, '').replace(/\/$/, '');
-    // Keep only valid handle characters
     cleaned = cleaned.replace(/[^a-zA-Z0-9._]/g, '');
     return cleaned;
   };
@@ -80,7 +114,6 @@ export default function Home() {
   const cleanHandle = parseInstagramInput(inputVal);
   const isValidHandleFormat = /^[a-zA-Z0-9._]{1,30}$/.test(cleanHandle);
 
-  // --- QR CODE IMAGE READER HANDLER ---
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -100,9 +133,9 @@ export default function Home() {
         const qrCode = jsQR(imageData.data, imageData.width, imageData.height);
 
         if (qrCode && qrCode.data) {
-          setInputVal(qrCode.data); // Automatically fills input with scanned link/handle
+          setInputVal(qrCode.data);
         } else {
-          alert('Could not detect a valid Instagram QR code in this image. Please try another image or paste your URL.');
+          alert('Could not detect a valid Instagram QR code in this image.');
         }
         setScanningQR(false);
       };
@@ -207,12 +240,13 @@ export default function Home() {
     <main className="min-h-screen bg-[#070708] text-white selection:bg-pink-500 selection:text-white font-sans">
       <Navbar />
 
+      {/* Dynamic Backend-Synced Total Visitors Tracker Badge */}
       <div className="flex justify-center pt-8 px-6">
         <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-zinc-900 border border-zinc-800 text-xs font-mono text-zinc-400 shadow-inner">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-          <span className="text-white font-semibold">608 online</span>
-          <span className="text-zinc-700">•</span>
-          <span className="text-zinc-400">1,294,383 visitors since launch</span>
+          <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+          <span className="text-zinc-300 font-semibold">
+            {totalVisitors !== null ? `${totalVisitors.toLocaleString()} visitors since launch` : 'Syncing visitors...'}
+          </span>
         </div>
       </div>
 
@@ -267,12 +301,10 @@ export default function Home() {
           </div>
 
           <form onSubmit={handleCheckout} className="space-y-4 pt-2 border-t border-zinc-900">
-            {/* Instagram Profile URL or QR Code Input */}
             <div className="space-y-1.5">
               <div className="flex justify-between items-center">
                 <label className="text-xs font-mono text-zinc-400 uppercase tracking-wider">Instagram Profile / QR Code</label>
                 
-                {/* Hidden File Input for QR Code Upload */}
                 <input 
                   type="file" 
                   ref={fileInputRef} 
@@ -303,7 +335,6 @@ export default function Home() {
               </div>
             </div>
 
-            {/* Live Position Card Preview */}
             {cleanHandle && isValidHandleFormat && (
               <div className="p-3.5 rounded-2xl bg-zinc-900/60 border border-zinc-800 flex items-center justify-between text-xs font-mono animate-fadeIn">
                 <div className="flex items-center gap-3">
