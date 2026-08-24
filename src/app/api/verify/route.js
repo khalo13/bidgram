@@ -4,12 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 
 export async function POST(request) {
   try {
-    // Initialize Supabase lazily inside the handler so it only reads process.env when a request is actually made at runtime
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_ROLE_KEY
-    );
-
+    const bodyData = await request.json();
     const {
       razorpay_order_id,
       razorpay_payment_id,
@@ -17,20 +12,33 @@ export async function POST(request) {
       handle,
       amount,
       category,
-    } = await request.json();
+    } = bodyData;
 
-    // 1. Verify Razorpay Signature securely
-    const body = razorpay_order_id + '|' + razorpay_payment_id;
-    const expectedSignature = crypto
-      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
-      .update(body.toString())
-      .digest('hex');
+    console.log("Verification payload received:", { razorpay_order_id, razorpay_payment_id, handle, amount, category });
 
-    if (expectedSignature !== razorpay_signature) {
-      return NextResponse.json({ success: false, error: 'Invalid signature' }, { status: 400 });
+    if (!process.env.RAZORPAY_KEY_SECRET) {
+      console.error("CRITICAL: RAZORPAY_KEY_SECRET is missing from environment variables!");
+      return NextResponse.json({ success: false, error: 'Server secret key missing' }, { status: 500 });
     }
 
-    // 2. Insert data into your Supabase table
+    // 1. Verify Razorpay Signature securely
+    const generated_signature = crypto
+      .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
+      .update(razorpay_order_id + '|' + razorpay_payment_id)
+      .digest('hex');
+
+    if (generated_signature !== razorpay_signature) {
+      console.error("Signature mismatch! Expected:", generated_signature, "Got:", razorpay_signature);
+      return NextResponse.json({ success: false, error: 'Invalid signature mismatch' }, { status: 400 });
+    }
+
+    // 2. Initialize Supabase lazily
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.env.SUPABASE_SERVICE_ROLE_KEY
+    );
+
+    // 3. Insert data into Supabase
     const { data, error } = await supabase.from('bids').insert([
       {
         instagram_handle: handle,
@@ -46,7 +54,7 @@ export async function POST(request) {
 
     return NextResponse.json({ success: true, data });
   } catch (err) {
-    console.error('Verification error:', err);
-    return NextResponse.json({ success: false, error: 'Internal server error' }, { status: 500 });
+    console.error('Verification catch error:', err);
+    return NextResponse.json({ success: false, error: err.message || 'Internal server error' }, { status: 500 });
   }
 }
