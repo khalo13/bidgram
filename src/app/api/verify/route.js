@@ -29,18 +29,35 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'Invalid signature' }, { status: 400 });
     }
 
-    // 2. Signature is valid! Now update/insert the bid in Supabase
-    // Using upsert ensures if the handle already exists, it updates their bid and category.
+    // 2. Signature is valid! Fetch existing user bid first to accumulate amounts
+    const { data: existingUser, error: fetchError } = await supabase
+      .from('bids')
+      .select('bid_amount')
+      .eq('instagram_handle', handle)
+      .maybeSingle(); // Use maybeSingle so it doesn't throw an error if the handle doesn't exist yet
+
+    if (fetchError) {
+      console.error('Supabase fetch error:', fetchError);
+      return NextResponse.json({ success: false, error: 'Database check failed' }, { status: 500 });
+    }
+
+    // Calculate final cumulative amount
+    let finalAmount = Number(amount);
+    if (existingUser) {
+      finalAmount = Number(existingUser.bid_amount) + Number(amount);
+    }
+
+    // 3. Upsert the new cumulative total into Supabase
     const { error: dbError } = await supabase
       .from('bids')
       .upsert(
         { 
           instagram_handle: handle, 
-          bid_amount: Number(amount), 
+          bid_amount: finalAmount, 
           category: category,
           updated_at: new Date()
         },
-        { onConflict: 'instagram_handle' } // Adjust based on your table's unique constraint column
+        { onConflict: 'instagram_handle' }
       );
 
     if (dbError) {
@@ -48,7 +65,7 @@ export async function POST(request) {
       return NextResponse.json({ success: false, error: 'Database update failed' }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true }, { status: 200 });
+    return NextResponse.json({ success: true, newTotal: finalAmount }, { status: 200 });
   } catch (err) {
     console.error('Verification error:', err);
     return NextResponse.json({ success: false, error: 'Server error' }, { status: 500 });
